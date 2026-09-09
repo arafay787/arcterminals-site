@@ -28,7 +28,6 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     username: referrer.username,
-    points: referrer.points,
     referrals: refCount,
   });
 }

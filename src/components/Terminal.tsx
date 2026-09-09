@@ -18,6 +18,7 @@ type Stage =
   | "auth_menu"
   | "reg_username"
   | "reg_email"
+  | "reg_email_code"
   | "reg_password"
   | "reg_confirm"
   | "reg_submit"
@@ -42,7 +43,6 @@ interface Me {
 
 interface ReferralContext {
   username: string;
-  points: number;
   referrals: number;
 }
 
@@ -261,8 +261,15 @@ function ReferralInfoBlock({ me }: { me: Me }) {
 
 function ShareWidget({ me }: { me: Me }) {
   const shareText = `I'm on ${PROJECT_NAME} \u2014 join the network and start earning points:`;
+  // X aggressively caches link-card previews per exact URL, so a link that
+  // was ever tested/pasted before (even without a working image at the
+  // time) can get stuck showing no card. Appending a changing query param
+  // makes every share a "new" URL to X's crawler, forcing a fresh fetch of
+  // the OG image every time - the /r/[code] route ignores query params, so
+  // referral attribution still works identically.
+  const cacheBustedLink = `${me.referralLink}?v=${Date.now()}`;
   const intentUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(
-    me.referralLink
+    cacheBustedLink
   )}`;
   const cardText = `+${"-".repeat(35)}
 ${PROJECT_NAME}
@@ -380,7 +387,7 @@ export default function Terminal({
   const [inputMasked, setInputMasked] = useState(false);
   const [busy, setBusy] = useState(false);
   const [me, setMe] = useState<Me | null>(null);
-  const [regDraft, setRegDraft] = useState({ username: "", email: "", password: "" });
+  const [regDraft, setRegDraft] = useState({ username: "", email: "", password: "", verifyToken: "" });
   const [menuIndex, setMenuIndex] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -482,9 +489,6 @@ export default function Terminal({
         push(`SOURCE USER:`);
         push(`@${referralContext.username}`, "success");
         push("", "output");
-        push(`USER POINTS:`);
-        push(`${referralContext.points.toLocaleString()}`, "success");
-        push("", "output");
         push(`REFERRAL STATUS:`);
         push(`ACTIVE`, "success");
         push("", "output");
@@ -584,10 +588,87 @@ export default function Terminal({
           break;
         }
         setRegDraft((d) => ({ ...d, email: value }));
+        setBusy(true);
         push("");
-        push("CREATE PASSWORD:");
-        setInputMasked(true);
-        setStage("reg_password");
+        push("SENDING VERIFICATION CODE...", "dim");
+        try {
+          const res = await fetch("/api/auth/send-code", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: value }),
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            push(data.error?.toUpperCase() ?? "COULD NOT SEND CODE.", "error");
+            push("");
+            push("ENTER EMAIL:");
+            setBusy(false);
+            break;
+          }
+          push(`CODE SENT TO ${value}.`, "success");
+          push("");
+          push("ENTER VERIFICATION CODE (OR TYPE \"RESEND\"):");
+          setStage("reg_email_code");
+        } catch {
+          push("CONNECTION ERROR. COULD NOT SEND CODE.", "error");
+          push("ENTER EMAIL:");
+        }
+        setBusy(false);
+        break;
+      }
+
+      case "reg_email_code": {
+        if (value.toLowerCase() === "resend") {
+          setBusy(true);
+          push("");
+          push("RESENDING CODE...", "dim");
+          const res = await fetch("/api/auth/send-code", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: regDraft.email }),
+          });
+          const data = await res.json();
+          if (res.ok) {
+            push("NEW CODE SENT.", "success");
+          } else {
+            push(data.error?.toUpperCase() ?? "COULD NOT RESEND.", "error");
+          }
+          push("ENTER VERIFICATION CODE (OR TYPE \"RESEND\"):");
+          setBusy(false);
+          break;
+        }
+        if (!/^\d{6}$/.test(value)) {
+          push("INVALID CODE. ENTER THE 6-DIGIT CODE FROM YOUR EMAIL.", "error");
+          push("ENTER VERIFICATION CODE (OR TYPE \"RESEND\"):");
+          break;
+        }
+        setBusy(true);
+        push("");
+        push("VERIFYING CODE...", "dim");
+        try {
+          const res = await fetch("/api/auth/verify-code", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: regDraft.email, code: value }),
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            push(data.error?.toUpperCase() ?? "VERIFICATION FAILED.", "error");
+            push("ENTER VERIFICATION CODE (OR TYPE \"RESEND\"):");
+            setBusy(false);
+            break;
+          }
+          setRegDraft((d) => ({ ...d, verifyToken: data.verifyToken }));
+          push("EMAIL VERIFIED.", "success");
+          push("");
+          push("CREATE PASSWORD:");
+          setInputMasked(true);
+          setStage("reg_password");
+        } catch {
+          push("CONNECTION ERROR.", "error");
+          push("ENTER VERIFICATION CODE (OR TYPE \"RESEND\"):");
+        }
+        setBusy(false);
         break;
       }
 

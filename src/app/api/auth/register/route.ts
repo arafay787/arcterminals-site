@@ -10,6 +10,7 @@ import {
   setSessionCookie,
   getReferralAttribution,
   clearReferralAttribution,
+  verifyEmailVerifyToken,
 } from "@/lib/auth";
 import { awardReferral } from "@/lib/points";
 
@@ -21,6 +22,7 @@ const RegisterSchema = z.object({
     .regex(/^[a-zA-Z0-9_]+$/, "letters, numbers, underscore only"),
   email: z.string().email("invalid email"),
   password: z.string().min(8, "password must be at least 8 characters"),
+  verifyToken: z.string().min(1, "email not verified"),
 });
 
 export async function POST(req: NextRequest) {
@@ -32,7 +34,11 @@ export async function POST(req: NextRequest) {
       { status: 400 }
     );
   }
-  const { username, email, password } = parsed.data;
+  const { username, email, password, verifyToken } = parsed.data;
+
+  if (!verifyEmailVerifyToken(verifyToken, email)) {
+    return NextResponse.json({ error: "email not verified - request a new code" }, { status: 401 });
+  }
 
   const usernameTaken = (await db.select().from(users).where(eq(users.username, username)))[0];
   if (usernameTaken) {

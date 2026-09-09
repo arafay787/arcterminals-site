@@ -51,5 +51,11 @@ export async function generateMetadata({ params }: { params: { code: string } })
 
 export default async function ReferralPage({ params }: { params: { code: string } }) {
   const referrer = await getReferrer(params.code);
-  return <Terminal referralContext={referrer} referralCode={params.code} />;
+  // Deliberately drop points here - the boot sequence a fresh visitor sees
+  // should only show who referred them, not that person's point total.
+  // (The OG share-card image above still shows points - that's the
+  // referrer's own public "flex card" when THEY post their link, a
+  // different surface from what a new visitor sees in-app.)
+  const referralContext = referrer ? { username: referrer.username, referrals: referrer.referrals } : null;
+  return <Terminal referralContext={referralContext} referralCode={params.code} />;
 }

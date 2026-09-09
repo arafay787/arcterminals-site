@@ -97,6 +97,16 @@ async function main() {
   await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS proof_label TEXT;`;
   await sql`ALTER TABLE task_completions ADD COLUMN IF NOT EXISTS proof TEXT;`;
 
+  await sql`
+    CREATE TABLE IF NOT EXISTS email_verifications (
+      email TEXT PRIMARY KEY,
+      code TEXT NOT NULL,
+      expires_at BIGINT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      created_at BIGINT NOT NULL
+    );
+  `;
+
   console.log("Postgres schema created/verified.");
   await sql.end();
 }

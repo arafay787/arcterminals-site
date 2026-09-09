@@ -84,3 +84,28 @@ export function getReferralAttribution(): string | null {
 export function clearReferralAttribution() {
   cookies().delete(REFERRAL_ATTRIBUTION_COOKIE);
 }
+
+// ---- Email verification token (short-lived, proves a code was verified) --
+// Issued once /api/auth/verify-code confirms the right code for an email.
+// Registration requires this token so the email step can't be skipped by
+// calling /api/auth/register directly.
+
+interface EmailVerifyPayload {
+  purpose: "email_verify";
+  email: string;
+}
+
+export function signEmailVerifyToken(email: string): string {
+  return jwt.sign({ purpose: "email_verify", email } satisfies EmailVerifyPayload, JWT_SECRET!, {
+    expiresIn: "15m",
+  });
+}
+
+export function verifyEmailVerifyToken(token: string, expectedEmail: string): boolean {
+  try {
+    const payload = jwt.verify(token, JWT_SECRET!) as EmailVerifyPayload;
+    return payload.purpose === "email_verify" && payload.email.toLowerCase() === expectedEmail.toLowerCase();
+  } catch {
+    return false;
+  }
+}

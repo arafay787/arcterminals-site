@@ -100,3 +100,11 @@ export const config = pgTable("config", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
 });
+
+export const emailVerifications = pgTable("email_verifications", {
+  email: text("email").primaryKey(),
+  code: text("code").notNull(),
+  expiresAt: bigint("expires_at", { mode: "number" }).notNull(),
+  attempts: integer("attempts").notNull().default(0),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+});
