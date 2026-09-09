@@ -48,6 +48,7 @@ export default function AdminTerminal({ adminUsername }: { adminUsername: string
       push("TOGGLETASK <taskId>           Enable/disable a task");
       push("CONFIG                        View referral reward config");
       push("SETREWARD <amount>            Set REFERRAL_REWARD");
+      push("EXPORT [limit]                Download top N users as CSV (default 500)");
       push("CLEAR                         Clear screen");
       return;
     }
@@ -190,6 +191,34 @@ export default function AdminTerminal({ adminUsername }: { adminUsername: string
       });
       if (res.ok) push(`REFERRAL_REWARD SET TO ${amt}.`, "success");
       else push("ERROR.", "error");
+      setBusy(false);
+      return;
+    }
+
+    if (lower === "export") {
+      const limit = rest[0] ?? "500";
+      setBusy(true);
+      push(`Exporting top ${limit} users...`, "dim");
+      const res = await fetch(`/api/admin/export?limit=${encodeURIComponent(limit)}`);
+      if (!res.ok) {
+        push("EXPORT FAILED.", "error");
+        setBusy(false);
+        return;
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get("Content-Disposition") ?? "";
+      const match = disposition.match(/filename="([^"]+)"/);
+      const filename = match?.[1] ?? `arcterminals-top-${limit}.csv`;
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      push(`DOWNLOADED: ${filename}`, "success");
+      push("Columns: rank, username, email, points, referrals, user_id, referral_code, joined_at", "dim");
       setBusy(false);
       return;
     }

@@ -14,19 +14,25 @@ export async function GET() {
 
   const activeTasks = await db.select().from(tasks).where(eq(tasks.active, true));
   const completions = await db.select().from(taskCompletions).where(eq(taskCompletions.userId, user.id));
-  const completedIds = new Set(completions.map((c) => c.taskId));
+  const completedById = new Map(completions.map((c) => [c.taskId, c]));
 
   const result = activeTasks
     .sort((a, b) => a.sortOrder - b.sortOrder)
-    .map((t) => ({
-      id: t.id,
-      title: t.title,
-      description: t.description,
-      reward: t.reward,
-      type: t.type,
-      url: t.url,
-      status: completedIds.has(t.id) ? "COMPLETE" : "PENDING",
-    }));
+    .map((t) => {
+      const completion = completedById.get(t.id);
+      return {
+        id: t.id,
+        title: t.title,
+        description: t.description,
+        reward: t.reward,
+        type: t.type,
+        url: t.url,
+        requiresProof: t.requiresProof,
+        proofLabel: t.proofLabel,
+        status: completion ? "COMPLETE" : "PENDING",
+        proof: completion?.proof ?? null,
+      };
+    });
 
-  return NextResponse.json({ tasks: result });
+  return NextResponse.json({ tasks: result, twitterUsername: user.twitterUsername });
 }

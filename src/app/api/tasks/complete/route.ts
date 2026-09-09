@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getCurrentUser } from "@/lib/auth";
 import { completeTask } from "@/lib/points";
 
-const Schema = z.object({ taskId: z.string().min(1) });
+const Schema = z.object({ taskId: z.string().min(1), proof: z.string().optional() });
 
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "invalid input" }, { status: 400 });
   }
 
-  const result = await completeTask(user.id, parsed.data.taskId);
+  const result = await completeTask(user.id, parsed.data.taskId, parsed.data.proof);
   if (!result.completed) {
     return NextResponse.json({ error: result.reason }, { status: 409 });
   }

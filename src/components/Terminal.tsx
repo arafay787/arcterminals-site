@@ -4,11 +4,12 @@ import { useEffect, useRef, useState, useCallback } from "react";
 
 const PROJECT_NAME = process.env.NEXT_PUBLIC_PROJECT_NAME ?? "ARC TERMINALS";
 
-type LineKind = "output" | "input-echo" | "error" | "success" | "dim" | "prompt";
+type LineKind = "output" | "input-echo" | "error" | "success" | "dim" | "prompt" | "widget";
 interface Line {
   id: number;
   text: string;
   kind: LineKind;
+  node?: React.ReactNode;
 }
 
 type Stage =
@@ -36,6 +37,7 @@ interface Me {
   rank: number;
   referralCode: string;
   referralLink: string;
+  twitterUsername?: string | null;
 }
 
 interface ReferralContext {
@@ -44,8 +46,326 @@ interface ReferralContext {
   referrals: number;
 }
 
+const MENU_ITEMS: { key: string; label: string; cmd: string }[] = [
+  { key: "profile", label: "PROFILE", cmd: "profile" },
+  { key: "referral", label: "REFERRAL", cmd: "referral" },
+  { key: "points", label: "POINTS", cmd: "points" },
+  { key: "tasks", label: "TASKS", cmd: "tasks" },
+  { key: "leaderboard", label: "LEADERBOARD", cmd: "leaderboard" },
+  { key: "share", label: "SHARE", cmd: "share" },
+  { key: "help", label: "HELP", cmd: "help" },
+  { key: "clear", label: "CLEAR", cmd: "clear" },
+  { key: "logout", label: "LOGOUT", cmd: "logout" },
+];
+
 let idCounter = 0;
 const nextId = () => ++idCounter;
+
+const URL_REGEX = /(https?:\/\/[^\s)]+)/g;
+
+/** Turns any http(s) URL inside a line's text into a real clickable link,
+ *  opened in a new tab, while leaving the rest of the line as plain text. */
+function linkify(text: string, keyPrefix: string): React.ReactNode {
+  const nodes: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let i = 0;
+  const regex = new RegExp(URL_REGEX);
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) nodes.push(text.slice(lastIndex, match.index));
+    const url = match[0];
+    nodes.push(
+      <a
+        key={`${keyPrefix}-${i++}`}
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="underline decoration-dotted hover:text-phosphor-amber"
+      >
+        {url}
+      </a>
+    );
+    lastIndex = match.index + url.length;
+  }
+  if (lastIndex < text.length) nodes.push(text.slice(lastIndex));
+  return nodes;
+}
+
+// ---------------------------------------------------------------------------
+// TASKS PANEL — real buttons, proof inputs, live green "DONE" state
+// ---------------------------------------------------------------------------
+
+interface TaskRow {
+  id: string;
+  title: string;
+  description: string;
+  reward: number;
+  url: string | null;
+  requiresProof: boolean;
+  proofLabel: string | null;
+  status: "PENDING" | "COMPLETE";
+  proof: string | null;
+}
+
+function TasksPanel({ onPointsChange }: { onPointsChange: () => Promise<Me | null> }) {
+  const [tasks, setTasks] = useState<TaskRow[] | null>(null);
+  const [proofDrafts, setProofDrafts] = useState<Record<string, string>>({});
+  const [completingId, setCompletingId] = useState<string | null>(null);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const load = useCallback(async () => {
+    const res = await fetch("/api/tasks");
+    if (!res.ok) return;
+    const data = await res.json();
+    setTasks(data.tasks ?? []);
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function complete(task: TaskRow) {
+    setErrors((e) => ({ ...e, [task.id]: "" }));
+    const proof = proofDrafts[task.id]?.trim();
+    if (task.requiresProof && !proof) {
+      setErrors((e) => ({ ...e, [task.id]: `${task.proofLabel ?? "Proof"} is required.` }));
+      return;
+    }
+    setCompletingId(task.id);
+    try {
+      const res = await fetch("/api/tasks/complete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskId: task.id, proof }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setErrors((e) => ({
+          ...e,
+          [task.id]: data.error === "already_completed" ? "Already completed." : "Could not complete — try again.",
+        }));
+      } else {
+        await load();
+        await onPointsChange();
+      }
+    } finally {
+      setCompletingId(null);
+    }
+  }
+
+  if (tasks === null) {
+    return <div className="text-phosphor/50 text-sm">Loading tasks...</div>;
+  }
+  if (tasks.length === 0) {
+    return <div className="text-phosphor/50 text-sm">No tasks available.</div>;
+  }
+
+  return (
+    <div className="flex flex-col gap-3 my-1 max-w-xl">
+      {tasks.map((t, i) => {
+        const done = t.status === "COMPLETE";
+        return (
+          <div
+            key={t.id}
+            className={`border rounded-md p-3 transition-colors ${
+              done ? "border-phosphor bg-phosphor/10" : "border-phosphor/25 bg-black/20"
+            }`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="font-bold text-sm">
+                  [{String(i + 1).padStart(2, "0")}] {t.title}
+                  {t.url && (
+                    <>
+                      {" \u2014 "}
+                      <a
+                        href={t.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline decoration-dotted hover:text-phosphor-amber"
+                      >
+                        CLICK
+                      </a>
+                    </>
+                  )}
+                </div>
+                <div className="text-phosphor/50 text-xs mt-1">{t.description}</div>
+                <div className="text-phosphor/60 text-xs mt-1">REWARD: +{t.reward} POINTS</div>
+              </div>
+              {done ? (
+                <span className="shrink-0 px-3 py-1 rounded bg-phosphor text-term-bg text-xs font-bold">
+                  DONE
+                </span>
+              ) : (
+                <button
+                  onClick={() => complete(t)}
+                  disabled={completingId === t.id}
+                  className="shrink-0 px-3 py-1 rounded border border-phosphor/40 text-xs font-bold hover:border-phosphor hover:bg-phosphor/10 disabled:opacity-50 transition-colors"
+                >
+                  {completingId === t.id ? "..." : "DONE"}
+                </button>
+              )}
+            </div>
+
+            {t.requiresProof && !done && (
+              <input
+                value={proofDrafts[t.id] ?? ""}
+                onChange={(e) => setProofDrafts((d) => ({ ...d, [t.id]: e.target.value }))}
+                placeholder={t.proofLabel ?? "Proof"}
+                className="mt-2 w-full bg-term-bg border border-phosphor/25 rounded px-2 py-1.5 text-xs outline-none focus:border-phosphor text-phosphor placeholder:text-phosphor/30"
+              />
+            )}
+            {t.requiresProof && done && t.proof && (
+              <div className="text-phosphor/40 text-xs mt-1.5 truncate">Submitted: {t.proof}</div>
+            )}
+            {errors[t.id] && <div className="text-phosphor-red text-xs mt-1.5">{errors[t.id]}</div>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ReferralInfoBlock({ me }: { me: Me }) {
+  const [rate, setRate] = useState<string>("10");
+  useEffect(() => {
+    fetch("/api/config/referral-reward")
+      .then((r) => r.json())
+      .then((d) => setRate(d.value ?? "10"))
+      .catch(() => {});
+  }, []);
+
+  return (
+    <div className="border border-phosphor-blue/40 rounded-md p-3 my-1 max-w-xl bg-phosphor-blue/5">
+      <div className="font-bold text-sm text-phosphor-blue">REFERRAL PROGRAM</div>
+      <div className="text-xs mt-1">
+        +{rate} POINTS for every valid referral {"\u2014"} automatic, no task to claim.
+      </div>
+      <div className="text-xs mt-1.5">
+        Your referrals so far: <span className="text-phosphor font-bold">{me.referrals}</span>
+      </div>
+      <div className="text-xs mt-1 truncate">
+        Your link:{" "}
+        <a
+          href={me.referralLink}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline decoration-dotted hover:text-phosphor-amber"
+        >
+          {me.referralLink}
+        </a>
+      </div>
+    </div>
+  );
+}
+
+function ShareWidget({ me }: { me: Me }) {
+  const shareText = `I'm on ${PROJECT_NAME} \u2014 join the network and start earning points:`;
+  const intentUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(
+    me.referralLink
+  )}`;
+  const cardText = `+${"-".repeat(35)}
+${PROJECT_NAME}
+
+USER: @${me.username}
+STATUS: ACTIVE
+POINTS: ${me.points.toLocaleString()}
+REFERRALS: ${me.referrals}
+RANK: #${me.rank > 0 ? String(me.rank).padStart(3, "0") : "---"}
+
+JOIN THE NETWORK
+${me.referralLink}
++${"-".repeat(35)}`;
+
+  return (
+    <div className="my-1 max-w-xl">
+      <pre className="border border-phosphor/30 rounded-md p-4 bg-black/30 whitespace-pre-wrap text-xs sm:text-sm font-mono">
+        {cardText}
+      </pre>
+      <a
+        href={intentUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-block mt-3 px-4 py-2 rounded border border-phosphor text-phosphor text-sm font-bold hover:bg-phosphor hover:text-term-bg transition-colors"
+      >
+        SHARE ON X &rarr;
+      </a>
+      <div className="text-phosphor/40 text-xs mt-2">
+        Opens X with your card pre-written {"\u2014"} just click Post there.
+      </div>
+    </div>
+  );
+}
+
+interface LeaderboardRow {
+  username: string;
+  points: number;
+  referrals: number;
+}
+
+function LeaderboardWidget({ me }: { me: Me | null }) {
+  const [rows, setRows] = useState<LeaderboardRow[] | null>(null);
+
+  useEffect(() => {
+    fetch("/api/leaderboard")
+      .then((r) => r.json())
+      .then((d) => setRows(d.leaderboard ?? []))
+      .catch(() => setRows([]));
+  }, []);
+
+  if (rows === null) return <div className="text-phosphor/50 text-sm">Loading leaderboard...</div>;
+
+  const VISIBLE = 30;
+  const visible = rows.slice(0, VISIBLE);
+  const myIndex = me ? rows.findIndex((r) => r.username === me.username) : -1;
+  const myShownAlready = myIndex > -1 && myIndex < VISIBLE;
+
+  const Row = ({ row, idx }: { row: LeaderboardRow; idx: number }) => {
+    const isMe = !!me && row.username === me.username;
+    return (
+      <div
+        className={`flex items-center gap-2 py-0.5 ${
+          isMe ? "text-phosphor font-bold bg-phosphor/10 rounded px-1 -mx-1" : "text-phosphor/80"
+        }`}
+      >
+        <span className="w-3">{isMe ? <span className="inline-block w-2 h-2 rounded-full bg-phosphor-amber" /> : ""}</span>
+        <span className="w-14 shrink-0">#{String(idx + 1).padStart(3, "0")}</span>
+        <span className="flex-1 truncate">{row.username}</span>
+        <span className="w-16 text-right shrink-0">{row.points.toLocaleString()}</span>
+        <span className="w-10 text-right shrink-0 text-phosphor/50">{row.referrals}</span>
+      </div>
+    );
+  };
+
+  return (
+    <div className="my-1 max-w-xl font-mono text-xs sm:text-sm">
+      <div className="flex items-center gap-2 text-phosphor/40 mb-1">
+        <span className="w-3" />
+        <span className="w-14 shrink-0">RANK</span>
+        <span className="flex-1">USER</span>
+        <span className="w-16 text-right shrink-0">POINTS</span>
+        <span className="w-10 text-right shrink-0">REFS</span>
+      </div>
+      {visible.map((row, i) => (
+        <Row key={row.username} row={row} idx={i} />
+      ))}
+      {!myShownAlready && myIndex > -1 && (
+        <>
+          <div className="text-phosphor/30 py-0.5">&#8942;</div>
+          <Row row={rows[myIndex]} idx={myIndex} />
+        </>
+      )}
+      {!myShownAlready && myIndex === -1 && me && (
+        <div className="text-phosphor/40 mt-2">
+          You're outside the top {rows.length} {"\u2014"} keep earning points to appear here.
+        </div>
+      )}
+      <div className="text-phosphor-amber inline-block mt-2 text-[10px]">
+        &#9679; = your position
+      </div>
+    </div>
+  );
+}
 
 export default function Terminal({
   referralContext,
@@ -61,12 +381,17 @@ export default function Terminal({
   const [busy, setBusy] = useState(false);
   const [me, setMe] = useState<Me | null>(null);
   const [regDraft, setRegDraft] = useState({ username: "", email: "", password: "" });
+  const [menuIndex, setMenuIndex] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const bootedRef = useRef(false);
 
   const push = useCallback((text: string, kind: LineKind = "output") => {
     setLines((prev) => [...prev, { id: nextId(), text, kind }]);
+  }, []);
+
+  const pushWidget = useCallback((node: React.ReactNode) => {
+    setLines((prev) => [...prev, { id: nextId(), text: "", kind: "widget", node }]);
   }, []);
 
   const pushMany = useCallback(
@@ -100,9 +425,6 @@ export default function Terminal({
     bootedRef.current = true;
 
     (async () => {
-      // Set referral attribution cookie server-side BEFORE registration can
-      // happen, so it survives the whole multi-step boot -> auth flow even
-      // if the tab is closed and reopened before signing up.
       if (referralCode) {
         await fetch("/api/referral/attribute", {
           method: "POST",
@@ -132,7 +454,6 @@ export default function Terminal({
       push("INITIALIZING USER ENVIRONMENT...", "dim");
       await sleep(500);
 
-      // Check for existing session
       const res = await fetch("/api/me").catch(() => null);
       if (res && res.ok) {
         const data = await res.json();
@@ -195,11 +516,12 @@ export default function Terminal({
     push(`POINTS............ ${data.points.toLocaleString()}`);
     push(`REFERRALS......... ${data.referrals}`);
     push(`RANK.............. #${data.rank > 0 ? String(data.rank).padStart(3, "0") : "---"}`);
+    if (data.twitterUsername) push(`X.................. @${data.twitterUsername}`);
     push("");
     push(`REFERRAL NODE:`);
     push(`${data.referralLink}`, "success");
     push("");
-    push("COMMANDS: HELP · PROFILE · REFERRAL · POINTS · TASKS · LEADERBOARD · SHARE · CLEAR · LOGOUT");
+    push('USE THE MENU BELOW (\u2191\u2193 + ENTER, OR CLICK/TAP) TO NAVIGATE.', "dim");
   }
 
   // ---- INPUT SUBMIT HANDLER ------------------------------------------
@@ -234,7 +556,7 @@ export default function Terminal({
           setStage("login_username");
         } else if (cmd === "help") {
           push("");
-          push('COMMANDS AVAILABLE HERE: REGISTER · LOGIN · HELP');
+          push('COMMANDS AVAILABLE HERE: REGISTER \u00b7 LOGIN \u00b7 HELP');
         } else {
           push("COMMAND NOT FOUND.", "error");
           push('TYPE "REGISTER" OR "LOGIN".', "dim");
@@ -336,7 +658,7 @@ export default function Terminal({
           push(data.referralLink, "success");
           push("");
           push('TYPE "CONTINUE" TO ENTER YOUR TERMINAL.', "dim");
-          setStage("reg_submit"); // stays here until they type CONTINUE
+          setStage("reg_submit");
           setBusy(false);
         } catch {
           push("CONNECTION ERROR. REMOTE DATABASE UNAVAILABLE.", "error");
@@ -438,7 +760,7 @@ export default function Terminal({
     const cmd = cmdRaw.trim();
     push("");
 
-    if (cmd === "help" || cmd === "7") {
+    if (cmd === "help") {
       push("AVAILABLE COMMANDS");
       push("");
       push("PROFILE       View account information");
@@ -450,105 +772,49 @@ export default function Terminal({
       push("STATUS        View system status");
       push("CLEAR         Clear terminal");
       push("LOGOUT        End session");
+      push("");
+      push("Or use the menu below \u2014 \u2191\u2193 to move, ENTER to select, or click/tap.", "dim");
       return;
     }
 
-    if (cmd === "profile" || cmd === "1") {
+    if (cmd === "profile") {
       const data = (await refreshMe()) ?? me;
       if (data) printProfileSummary(data);
       return;
     }
 
-    if (cmd === "referral" || cmd === "2") {
+    if (cmd === "referral") {
       const data = (await refreshMe()) ?? me;
       if (!data) return;
-      push(`REFERRALS......... ${data.referrals}`);
-      push("");
-      push("REFERRAL NODE:");
-      push(data.referralLink, "success");
+      pushWidget(<ReferralInfoBlock key={`ref-${Date.now()}`} me={data} />);
       return;
     }
 
-    if (cmd === "points" || cmd === "3") {
+    if (cmd === "points") {
       const data = (await refreshMe()) ?? me;
       if (!data) return;
       push(`TOTAL POINTS: ${data.points.toLocaleString()}`, "success");
       return;
     }
 
-    if (cmd === "tasks" || cmd === "4") {
+    if (cmd === "tasks") {
       setBusy(true);
       push("TERMINAL://TASKS");
       push("");
-      const res = await fetch("/api/tasks");
-      const data = await res.json();
-      if (!data.tasks?.length) {
-        push("NO TASKS AVAILABLE.", "dim");
-      } else {
-        push("AVAILABLE TASKS");
-        push("");
-        data.tasks.forEach((t: any, i: number) => {
-          push(`[${String(i + 1).padStart(2, "0")}] ${t.title}`);
-          push(`REWARD: +${t.reward} POINTS`);
-          push(`STATUS: ${t.status}`, t.status === "COMPLETE" ? "success" : "dim");
-          push("");
-        });
-        push('TYPE "COMPLETE <NUMBER>" TO CLAIM A TASK, e.g. COMPLETE 1', "dim");
-      }
+      const data = (await refreshMe()) ?? me;
+      if (data) pushWidget(<ReferralInfoBlock key={`ref-${Date.now()}`} me={data} />);
+      push("AVAILABLE TASKS");
+      pushWidget(<TasksPanel key={`tasks-${Date.now()}`} onPointsChange={refreshMe} />);
       setStage("view_tasks");
       setBusy(false);
       return;
     }
 
-    if (cmd.startsWith("complete ")) {
-      const idx = parseInt(cmd.replace("complete ", "").trim(), 10);
-      setBusy(true);
-      const res = await fetch("/api/tasks");
-      const data = await res.json();
-      const task = data.tasks?.[idx - 1];
-      if (!task) {
-        push("TASK NOT FOUND.", "error");
-        setBusy(false);
-        return;
-      }
-      push("VERIFYING TASK...", "dim");
-      await sleep(400);
-      const completeRes = await fetch("/api/tasks/complete", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ taskId: task.id }),
-      });
-      const completeData = await completeRes.json();
-      if (!completeRes.ok) {
-        push(
-          completeData.error === "already_completed" ? "TASK ALREADY CLAIMED." : "TASK VERIFICATION FAILED.",
-          "error"
-        );
-      } else {
-        push("TASK VERIFIED.", "success");
-        push("");
-        push(`+${completeData.reward} POINTS`, "success");
-        const fresh = await refreshMe();
-        if (fresh) push(`TOTAL POINTS: ${fresh.points.toLocaleString()}`);
-      }
-      setBusy(false);
-      return;
-    }
-
-    if (cmd === "leaderboard" || cmd === "5") {
+    if (cmd === "leaderboard") {
       setBusy(true);
       push("TERMINAL://LEADERBOARD");
       push("");
-      push("RANK   USER                  POINTS      REFERRALS");
-      const res = await fetch("/api/leaderboard");
-      const data = await res.json();
-      data.leaderboard.forEach((row: any, i: number) => {
-        const rank = `#${String(i + 1).padStart(3, "0")}`;
-        const uname = row.username.padEnd(20, " ").slice(0, 20);
-        const pts = String(row.points.toLocaleString()).padStart(8, " ");
-        const refs = String(row.referrals).padStart(9, " ");
-        push(`${rank}  ${uname}  ${pts}   ${refs}`, me && row.username === me.username ? "success" : "output");
-      });
+      pushWidget(<LeaderboardWidget key={`lb-${Date.now()}`} me={me} />);
       push("");
       push("SYSTEM STATUS: LIVE", "dim");
       setStage("view_leaderboard");
@@ -556,24 +822,12 @@ export default function Terminal({
       return;
     }
 
-    if (cmd === "share" || cmd === "6") {
+    if (cmd === "share") {
       const data = (await refreshMe()) ?? me;
       if (!data) return;
-      push("\u250c" + "\u2500".repeat(35));
-      push(`${PROJECT_NAME}`);
+      push("TERMINAL://SHARE");
       push("");
-      push(`USER: @${data.username}`);
-      push(`STATUS: ACTIVE`, "success");
-      push(`POINTS: ${data.points.toLocaleString()}`);
-      push(`REFERRALS: ${data.referrals}`);
-      push(`RANK: #${data.rank > 0 ? String(data.rank).padStart(3, "0") : "---"}`);
-      push("");
-      push("JOIN THE NETWORK");
-      push(data.referralLink, "success");
-      push("\u2514" + "\u2500".repeat(35));
-      push("");
-      push("SHARE CARD READY. POST YOUR REFERRAL LINK ON X \u2014");
-      push("THE CARD ABOVE RENDERS AUTOMATICALLY AS YOUR LINK PREVIEW.", "dim");
+      pushWidget(<ShareWidget key={`share-${Date.now()}`} me={data} />);
       setStage("view_share");
       return;
     }
@@ -590,7 +844,7 @@ export default function Terminal({
       return;
     }
 
-    if (cmd === "logout" || cmd === "8" || cmd === "exit") {
+    if (cmd === "logout") {
       await fetch("/api/auth/logout", { method: "POST" });
       setMe(null);
       push("SESSION TERMINATED.", "dim");
@@ -604,6 +858,28 @@ export default function Terminal({
     push('TYPE "HELP" FOR AVAILABLE COMMANDS.', "dim");
   }
 
+  const menuVisible = stage === "main" || stage.startsWith("view_");
+
+  async function runMenuItem(cmd: string) {
+    if (busy) return;
+    push(cmd, "input-echo");
+    await handleCommand(cmd);
+  }
+
+  function handleInputKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (!menuVisible || input.length > 0 || busy) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setMenuIndex((i) => (i + 1) % MENU_ITEMS.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setMenuIndex((i) => (i - 1 + MENU_ITEMS.length) % MENU_ITEMS.length);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      runMenuItem(MENU_ITEMS[menuIndex].cmd);
+    }
+  }
+
   const kindClass: Record<LineKind, string> = {
     output: "text-phosphor/90",
     "input-echo": "text-phosphor/60",
@@ -611,6 +887,7 @@ export default function Terminal({
     success: "text-phosphor text-glow",
     dim: "text-phosphor/45",
     prompt: "text-phosphor",
+    widget: "",
   };
 
   const promptLabel =
@@ -623,27 +900,51 @@ export default function Terminal({
   return (
     <div className="min-h-screen w-full flex items-center justify-center bg-term-bg p-3 sm:p-6">
       <div className="crt w-full max-w-4xl h-[85vh] sm:h-[80vh] bg-term-panel border border-phosphor/25 rounded-md shadow-[0_0_60px_rgba(57,255,106,0.08)] flex flex-col">
-        <div className="flex items-center gap-2 px-4 py-2 border-b border-phosphor/15 text-xs text-phosphor/50">
+        <div className="flex items-center gap-2 px-4 py-2 border-b border-phosphor/15 text-xs text-phosphor/50 shrink-0">
           <span className="w-2 h-2 rounded-full bg-phosphor/40" />
           <span>{PROJECT_NAME} TERMINAL v1.0</span>
         </div>
+
+        {menuVisible && (
+          <div className="shrink-0 border-b border-phosphor/15 px-4 sm:px-6 py-2 flex flex-col gap-0.5 max-h-40 overflow-y-auto">
+            {MENU_ITEMS.map((item, i) => (
+              <button
+                key={item.key}
+                onClick={() => runMenuItem(item.cmd)}
+                onMouseEnter={() => setMenuIndex(i)}
+                className={`text-left px-2 py-1 rounded text-xs sm:text-sm transition-colors ${
+                  i === menuIndex
+                    ? "bg-phosphor/15 text-phosphor border border-phosphor/40"
+                    : "text-phosphor/50 border border-transparent hover:text-phosphor/80"
+                }`}
+              >
+                {i === menuIndex ? "\u203a " : "  "}
+                {item.label}
+              </button>
+            ))}
+          </div>
+        )}
 
         <div
           ref={scrollRef}
           className="term-scrollback flex-1 overflow-y-auto overflow-x-auto px-4 sm:px-6 py-4 text-sm sm:text-[15px] leading-relaxed"
         >
-          {lines.map((l) => (
-            <div key={l.id} className={`${kindClass[l.kind]} whitespace-pre`}>
-              {l.kind === "input-echo" ? (
-                <span>
-                  <span className="text-phosphor/40">{"> "}</span>
-                  {l.text}
-                </span>
-              ) : (
-                l.text || "\u00A0"
-              )}
-            </div>
-          ))}
+          {lines.map((l) =>
+            l.kind === "widget" ? (
+              <div key={l.id}>{l.node}</div>
+            ) : (
+              <div key={l.id} className={`${kindClass[l.kind]} whitespace-pre`}>
+                {l.kind === "input-echo" ? (
+                  <span>
+                    <span className="text-phosphor/40">{"> "}</span>
+                    {l.text}
+                  </span>
+                ) : (
+                  linkify(l.text || "\u00A0", `line-${l.id}`)
+                )}
+              </div>
+            )
+          )}
 
           {stage !== "booting" && (
             <form onSubmit={handleSubmit} className="flex items-center gap-2 mt-1">
@@ -653,6 +954,7 @@ export default function Terminal({
                 type={inputMasked ? "password" : "text"}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleInputKeyDown}
                 disabled={busy}
                 autoFocus
                 autoComplete="off"

@@ -33,44 +33,86 @@ async function main() {
     console.log("Set REFERRAL_REWARD = 10");
   }
 
-  // --- Example tasks ----------------------------------------------------
-  const [{ count }] = await sql`SELECT COUNT(*)::int as count FROM tasks`;
-  if (count === 0) {
-    const tasks = [
-      {
-        title: "FOLLOW PROJECT ON X",
-        description: "Follow @ArcTerminals on X to stay updated on mainnet launch.",
-        reward: 25,
-        type: "follow_x",
-        url: "https://x.com/ArcTerminals",
-        sortOrder: 1,
-      },
-      {
-        title: "JOIN COMMUNITY",
-        description: "Join the ArcTerminals Discord server.",
-        reward: 15,
-        type: "join_community",
-        url: "https://discord.gg/arcterminals",
-        sortOrder: 2,
-      },
-      {
-        title: "SHARE REFERRAL LINK",
-        description: "Post your referral link on X.",
-        reward: 50,
-        type: "share_link",
-        url: null,
-        sortOrder: 3,
-      },
-    ];
-    for (const t of tasks) {
+  // --- Tasks: upsert by `type`, so re-running this safely updates an -----
+  // --- already-live deployment instead of only seeding an empty one. -----
+  // NOTE: the like/repost/comment URLs below are placeholders pointing at
+  // the project's profile — update them via the admin `SETURL` command
+  // once there's a real pinned launch post to point at.
+  const desiredTasks = [
+    {
+      type: "follow_x",
+      title: "FOLLOW PROJECT ON X",
+      description: "Follow @ArcTerminals on X.",
+      reward: 10,
+      url: "https://x.com/ArcTerminals",
+      sortOrder: 1,
+      requiresProof: true,
+      proofLabel: "Enter your X (Twitter) username",
+    },
+    {
+      type: "like_x",
+      title: "LIKE THE POST",
+      description: "Like the pinned post on X.",
+      reward: 5,
+      url: "https://x.com/ArcTerminals",
+      sortOrder: 2,
+      requiresProof: false,
+      proofLabel: null as string | null,
+    },
+    {
+      type: "repost_x",
+      title: "REPOST",
+      description: "Repost the pinned post on X.",
+      reward: 5,
+      url: "https://x.com/ArcTerminals",
+      sortOrder: 3,
+      requiresProof: false,
+      proofLabel: null as string | null,
+    },
+    {
+      type: "comment_x",
+      title: "COMMENT",
+      description: "Comment on the pinned post on X.",
+      reward: 15,
+      url: "https://x.com/ArcTerminals",
+      sortOrder: 4,
+      requiresProof: true,
+      proofLabel: "Paste your comment link",
+    },
+  ];
+
+  for (const t of desiredTasks) {
+    const existing = await sql`SELECT id FROM tasks WHERE type = ${t.type}`;
+    if (existing.length === 0) {
       await sql`
-        INSERT INTO tasks (id, title, description, reward, type, url, active, sort_order, created_at, updated_at)
-        VALUES (${nanoid()}, ${t.title}, ${t.description}, ${t.reward}, ${t.type}, ${t.url}, TRUE, ${t.sortOrder}, ${now}, ${now})
+        INSERT INTO tasks (id, title, description, reward, type, url, active, sort_order, requires_proof, proof_label, created_at, updated_at)
+        VALUES (${nanoid()}, ${t.title}, ${t.description}, ${t.reward}, ${t.type}, ${t.url}, TRUE, ${t.sortOrder}, ${t.requiresProof}, ${t.proofLabel}, ${now}, ${now})
       `;
+      console.log(`Created task: ${t.title}`);
+    } else {
+      await sql`
+        UPDATE tasks SET
+          title = ${t.title},
+          description = ${t.description},
+          reward = ${t.reward},
+          sort_order = ${t.sortOrder},
+          requires_proof = ${t.requiresProof},
+          proof_label = ${t.proofLabel},
+          active = TRUE,
+          updated_at = ${now}
+        WHERE type = ${t.type}
+      `;
+      console.log(`Updated task: ${t.title}`);
     }
-    console.log(`Created ${tasks.length} example tasks.`);
-  } else {
-    console.log(`${count} task(s) already exist, skipping.`);
+  }
+
+  // Retire the old generic tasks that are being replaced by the granular
+  // follow/like/repost/comment set and the always-visible referral info
+  // block (deactivate rather than delete, so history/audit isn't lost).
+  const retiredTypes = ["share_link"];
+  for (const type of retiredTypes) {
+    const result = await sql`UPDATE tasks SET active = FALSE, updated_at = ${now} WHERE type = ${type} AND active = TRUE`;
+    if (result.count > 0) console.log(`Retired old task of type "${type}"`);
   }
 
   await sql.end();

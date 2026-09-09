@@ -80,11 +80,15 @@ export async function awardReferral(referrerId: string, referredUserId: string, 
  * throws/no-ops if already claimed, so this is safe under concurrent
  * requests too, not just sequential ones.
  */
-export async function completeTask(userId: string, taskId: string) {
+export async function completeTask(userId: string, taskId: string, proof?: string) {
   const taskRows = await db.select().from(tasks).where(eq(tasks.id, taskId));
   const task = taskRows[0];
   if (!task || !task.active) {
     return { completed: false, reason: "task_not_found" as const };
+  }
+
+  if (task.requiresProof && !proof?.trim()) {
+    return { completed: false, reason: "proof_required" as const };
   }
 
   const existingRows = await db
@@ -101,10 +105,17 @@ export async function completeTask(userId: string, taskId: string) {
       taskId,
       userId,
       reward: task.reward,
+      proof: proof?.trim() || null,
       completedAt: Date.now(),
     });
   } catch {
     return { completed: false, reason: "already_completed" as const };
+  }
+
+  // The follow task's "proof" is the user's X username - also save it on
+  // their profile so it's reusable (shown, exported) without re-asking.
+  if (task.type === "follow_x" && proof?.trim()) {
+    await db.update(users).set({ twitterUsername: proof.trim().replace(/^@/, "") }).where(eq(users.id, userId));
   }
 
   await addPoints(userId, task.reward, "task", taskId);

@@ -91,6 +91,12 @@ async function main() {
     );
   `;
 
+  // --- Migrations for columns added after initial launch ---------------
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS twitter_username TEXT;`;
+  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS requires_proof BOOLEAN NOT NULL DEFAULT FALSE;`;
+  await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS proof_label TEXT;`;
+  await sql`ALTER TABLE task_completions ADD COLUMN IF NOT EXISTS proof TEXT;`;
+
   console.log("Postgres schema created/verified.");
   await sql.end();
 }

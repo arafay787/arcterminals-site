@@ -20,6 +20,7 @@ export const users = pgTable(
     referredById: text("referred_by_id"),
 
     points: integer("points").notNull().default(0),
+    twitterUsername: text("twitter_username"),
 
     createdAt: bigint("created_at", { mode: "number" }).notNull(),
     updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
@@ -58,6 +59,8 @@ export const tasks = pgTable("tasks", {
   url: text("url"),
   active: boolean("active").notNull().default(true),
   sortOrder: integer("sort_order").notNull().default(0),
+  requiresProof: boolean("requires_proof").notNull().default(false),
+  proofLabel: text("proof_label"), // e.g. "Paste your comment link"
   createdAt: bigint("created_at", { mode: "number" }).notNull(),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
 });
@@ -69,6 +72,7 @@ export const taskCompletions = pgTable(
     taskId: text("task_id").notNull(),
     userId: text("user_id").notNull(),
     reward: integer("reward").notNull(),
+    proof: text("proof"), // e.g. submitted comment link or X username
     completedAt: bigint("completed_at", { mode: "number" }).notNull(),
   },
   (t) => ({

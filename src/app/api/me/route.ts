@@ -23,6 +23,7 @@ export async function GET() {
     rank,
     referralCode: user.referralCode,
     referralLink: `${process.env.NEXT_PUBLIC_SITE_URL}/r/${user.referralCode}`,
+    twitterUsername: user.twitterUsername,
     createdAt: user.createdAt,
   });
 }
