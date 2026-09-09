@@ -46,6 +46,7 @@ export default function AdminTerminal({ adminUsername }: { adminUsername: string
       push("CREATETASK                    Create a task (interactive-free form below)");
       push("  usage: createtask \"Title\" \"Description\" reward type [url]");
       push("TOGGLETASK <taskId>           Enable/disable a task");
+      push("DELETEUSER <username>         Permanently delete a user (asks to confirm)");
       push("CONFIG                        View referral reward config");
       push("SETREWARD <amount>            Set REFERRAL_REWARD");
       push("EXPORT [limit]                Download top N users as CSV (default 500)");
@@ -164,6 +165,43 @@ export default function AdminTerminal({ adminUsername }: { adminUsername: string
       });
       if (res.ok) push(`TASK ${task.active ? "DISABLED" : "ENABLED"}.`, "success");
       else push("ERROR.", "error");
+      setBusy(false);
+      return;
+    }
+
+    if (lower === "deleteuser") {
+      const username = rest[0];
+      const confirmed = rest[1]?.toLowerCase() === "confirm";
+      if (!username) {
+        push("USAGE: DELETEUSER <username>", "error");
+        return;
+      }
+      setBusy(true);
+      const searchRes = await fetch(`/api/admin/users?q=${encodeURIComponent(username)}`);
+      const searchData = await searchRes.json();
+      const target = searchData.users?.find((u: any) => u.username.toLowerCase() === username.toLowerCase());
+      if (!target) {
+        push("USER NOT FOUND.", "error");
+        setBusy(false);
+        return;
+      }
+
+      if (!confirmed) {
+        push(`ABOUT TO PERMANENTLY DELETE: ${target.username}`, "error");
+        push(`POINTS: ${target.points}  REFERRALS: ${target.referrals}`, "dim");
+        push("THIS CANNOT BE UNDONE.", "error");
+        push("");
+        push(`TYPE: DELETEUSER ${target.username} CONFIRM`, "dim");
+        setBusy(false);
+        return;
+      }
+
+      const res = await fetch(`/api/admin/users?username=${encodeURIComponent(target.username)}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (res.ok) push(`DELETED: ${data.username}`, "success");
+      else push(data.error?.toUpperCase() ?? "DELETE FAILED.", "error");
       setBusy(false);
       return;
     }
