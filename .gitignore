@@ -18,3 +18,4 @@ dev.db-wal
 .DS_Store
 *.log
 npm-debug.log*
+.env
