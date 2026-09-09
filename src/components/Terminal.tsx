@@ -260,7 +260,7 @@ function ReferralInfoBlock({ me }: { me: Me }) {
 }
 
 function ShareWidget({ me }: { me: Me }) {
-  const shareText = `I'm on ${PROJECT_NAME} \u2014 join the network and start earning points:`;
+  const shareText = `Just logged into the ${PROJECT_NAME} network \u2014 booting up early, earning points, and climbing the leaderboard ahead of mainnet. Join in and start stacking your own:`;
   // X aggressively caches link-card previews per exact URL, so a link that
   // was ever tested/pasted before (even without a working image at the
   // time) can get stuck showing no card. Appending a changing query param
