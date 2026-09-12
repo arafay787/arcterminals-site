@@ -48,6 +48,7 @@ export default function AdminTerminal({ adminUsername }: { adminUsername: string
       push("TOGGLETASK <taskId>           Enable/disable a task");
       push("DELETEUSER <username>         Permanently delete a user (asks to confirm)");
       push("RENAMEUSER <old> <new>        Change a user's username (and referral link)");
+      push("RESETTASK <username> <taskId> Wipe a user's submitted proof, undo points, redo-able");
       push("CONFIG                        View referral reward config");
       push("SETREWARD <amount>            Set REFERRAL_REWARD");
       push("EXPORT [limit]                Download top N users as CSV (default 500)");
@@ -229,6 +230,40 @@ export default function AdminTerminal({ adminUsername }: { adminUsername: string
         }
       } else {
         push(data.error?.toUpperCase() ?? "RENAME FAILED.", "error");
+      }
+      setBusy(false);
+      return;
+    }
+
+    if (lower === "resettask") {
+      const [username, taskIdInput] = rest;
+      if (!username || !taskIdInput) {
+        push("USAGE: RESETTASK <username> <taskId>", "error");
+        return;
+      }
+      setBusy(true);
+      // Same partial-id convenience as TOGGLETASK - resolve a prefix match
+      // against the real task list before calling the reset endpoint.
+      const listRes = await fetch("/api/admin/tasks");
+      const listData = await listRes.json();
+      const task = listData.tasks?.find((t: any) => t.id === taskIdInput || t.id.startsWith(taskIdInput));
+      if (!task) {
+        push("TASK NOT FOUND.", "error");
+        setBusy(false);
+        return;
+      }
+      const res = await fetch("/api/admin/reset-task", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, taskId: task.id }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        push(`RESET: ${data.username} / ${data.task}`, "success");
+        push(`POINTS REMOVED: ${data.pointsRemoved}  NEW TOTAL: ${data.newPoints}`, "dim");
+        push("TASK IS NOW PENDING AGAIN - THEY CAN RESUBMIT.", "dim");
+      } else {
+        push(data.error?.toUpperCase() ?? "RESET FAILED.", "error");
       }
       setBusy(false);
       return;
