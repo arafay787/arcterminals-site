@@ -133,7 +133,19 @@ export async function DELETE(req: NextRequest) {
   if (!target) return NextResponse.json({ error: "user not found" }, { status: 404 });
 
   if (target.role === "admin") {
-    return NextResponse.json({ error: "cannot delete an admin account this way" }, { status: 403 });
+    if (target.id === admin.id) {
+      return NextResponse.json(
+        { error: "cannot delete your own account while logged in as it" },
+        { status: 403 }
+      );
+    }
+    const adminCount = (await db.select().from(users).where(eq(users.role, "admin"))).length;
+    if (adminCount <= 1) {
+      return NextResponse.json(
+        { error: "cannot delete the only remaining admin account" },
+        { status: 403 }
+      );
+    }
   }
 
   // Clean up everything tied to this user before removing the row itself.
