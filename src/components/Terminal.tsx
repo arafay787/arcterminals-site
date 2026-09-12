@@ -226,6 +226,21 @@ function TasksPanel({ onPointsChange }: { onPointsChange: () => Promise<Me | nul
   );
 }
 
+function PriorityAccessBanner({ me }: { me: Me }) {
+  return (
+    <div className="border border-phosphor-amber/50 rounded-md p-3 my-1 max-w-xl bg-phosphor-amber/5">
+      <div className="font-bold text-sm text-phosphor-amber">&#9888; PRIORITY ACCESS</div>
+      <div className="text-xs mt-1">
+        TOP 500 MEMBERS BY POINTS GET PRIORITY ACCESS WHEN MAINNET LAUNCHES.
+      </div>
+      <div className="text-xs mt-1.5">
+        YOUR RANK: <span className="text-phosphor-amber font-bold">#{me.rank > 0 ? String(me.rank).padStart(3, "0") : "---"}</span>
+        {" \u2014 complete tasks below to climb."}
+      </div>
+    </div>
+  );
+}
+
 function ReferralInfoBlock({ me }: { me: Me }) {
   const [rate, setRate] = useState<string>("10");
   useEffect(() => {
@@ -883,6 +898,7 @@ export default function Terminal({
       push("TERMINAL://TASKS");
       push("");
       const data = (await refreshMe()) ?? me;
+      if (data) pushWidget(<PriorityAccessBanner key={`prio-${Date.now()}`} me={data} />);
       if (data) pushWidget(<ReferralInfoBlock key={`ref-${Date.now()}`} me={data} />);
       push("AVAILABLE TASKS");
       pushWidget(<TasksPanel key={`tasks-${Date.now()}`} onPointsChange={refreshMe} />);
