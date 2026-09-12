@@ -47,6 +47,7 @@ export default function AdminTerminal({ adminUsername }: { adminUsername: string
       push("  usage: createtask \"Title\" \"Description\" reward type [url]");
       push("TOGGLETASK <taskId>           Enable/disable a task");
       push("DELETEUSER <username>         Permanently delete a user (asks to confirm)");
+      push("RENAMEUSER <old> <new>        Change a user's username (and referral link)");
       push("CONFIG                        View referral reward config");
       push("SETREWARD <amount>            Set REFERRAL_REWARD");
       push("EXPORT [limit]                Download top N users as CSV (default 500)");
@@ -202,6 +203,33 @@ export default function AdminTerminal({ adminUsername }: { adminUsername: string
       const data = await res.json();
       if (res.ok) push(`DELETED: ${data.username}`, "success");
       else push(data.error?.toUpperCase() ?? "DELETE FAILED.", "error");
+      setBusy(false);
+      return;
+    }
+
+    if (lower === "renameuser") {
+      const [oldUsername, newUsername] = rest;
+      if (!oldUsername || !newUsername) {
+        push("USAGE: RENAMEUSER <old> <new>", "error");
+        return;
+      }
+      setBusy(true);
+      const res = await fetch("/api/admin/users", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "rename", username: oldUsername, newUsername }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        push(`RENAMED: ${data.oldUsername} -> ${data.newUsername}`, "success");
+        push(`NEW REFERRAL LINK: ${data.newReferralLink}`, "dim");
+        if (oldUsername.toLowerCase() === adminUsername.toLowerCase()) {
+          push("");
+          push("THAT WAS YOUR OWN ACCOUNT - LOG OUT AND BACK IN TO REFRESH YOUR SESSION.", "dim");
+        }
+      } else {
+        push(data.error?.toUpperCase() ?? "RENAME FAILED.", "error");
+      }
       setBusy(false);
       return;
     }
